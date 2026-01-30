@@ -1,1 +1,19 @@
+# Data manipulation and analysis
+pandas>=2.0.0
+numpy>=1.24.0
 
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.14.0
+
+# Statistical analysis
+scipy>=1.10.0
+
+# Dashboard framework
+streamlit>=1.28.0
+streamlit-plotly-events>=0.0.6  # For interactive plotly events in Streamlit
+
+# Additional utilities
+openpyxl>=3.1.0  # For Excel file support
+xlrd>=2.0.1      # For reading older Excel files

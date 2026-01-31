@@ -273,7 +273,7 @@ with tab_grafico:
     else:
         corr = df[numeric_cols].corr().round(decimal_places)
         fig_corr, ax_corr = plt.subplots(figsize=(max(8, len(numeric_cols)), max(6, len(numeric_cols) * 0.6)))
-        sns.heatmap(corr, annot=True, fmt=f".{decimal_places}f", cmap="RdBu_r", center=0, ax=ax_corr, square=True)
+        sns.heatmap(corr, annot=True, fmt=f".{decimal_places}f", cmap="Blues", vmin=-1, vmax=1, ax=ax_corr, square=True)
         plt.xticks(rotation=45, ha="right")
         plt.yticks(rotation=0)
         plt.tight_layout()

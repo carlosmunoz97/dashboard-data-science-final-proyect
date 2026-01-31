@@ -17,3 +17,6 @@ streamlit-plotly-events>=0.0.6  # For interactive plotly events in Streamlit
 # Additional utilities
 openpyxl>=3.1.0  # For Excel file support
 xlrd>=2.0.1      # For reading older Excel files
+
+# Asistente EDA con LLM
+groq>=0.4.0

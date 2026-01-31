@@ -11,6 +11,11 @@ import seaborn as sns
 import plotly.express as px
 from scipy import stats
 
+try:
+    from groq import Groq
+except ImportError:
+    Groq = None
+
 # Configuración de la página
 st.set_page_config(
     page_title="EDA Dashboard",
@@ -38,6 +43,15 @@ with st.sidebar:
         "Selecciona un archivo",
         type=["csv", "xlsx", "xls"],
         help="Formatos: CSV, Excel (.xlsx, .xls)"
+    )
+
+    st.divider()
+    st.header("🤖 Asistente de análisis (Groq)")
+    groq_api_key = st.sidebar.text_input(
+        "API Key de Groq",
+        type="password",
+        placeholder="gsk_...",
+        help="Obtén tu API key en https://console.groq.com. Se usa solo para el asistente de análisis."
     )
 
     st.divider()
@@ -85,9 +99,9 @@ else:
 numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
 
-# Tabs principales: Cualitativo | Cuantitativo | Gráfico
-tab_cualitativo, tab_cuantitativo, tab_grafico = st.tabs([
-    "📋 Cualitativo", "📈 Cuantitativo", "📉 Gráfico"
+# Tabs principales: Cualitativo | Cuantitativo | Gráfico | Asistente
+tab_cualitativo, tab_cuantitativo, tab_grafico, tab_asistente = st.tabs([
+    "📋 Cualitativo", "📈 Cuantitativo", "📉 Gráfico", "🤖 Asistente de análisis"
 ])
 
 # ========== CUALITATIVO ==========
@@ -279,6 +293,94 @@ with tab_grafico:
         plt.tight_layout()
         st.pyplot(fig_corr)
         plt.close()
+
+# ========== ASISTENTE DE ANÁLISIS (GROQ + LLAMA 3.3) ==========
+def _build_eda_summary(df: pd.DataFrame, numeric_cols: list, cat_cols: list, decimal_places: int = 2) -> str:
+    """Construye un resumen en texto del EDA para enviar al LLM."""
+    lines = []
+    lines.append(f"Dataset: {len(df)} filas, {len(df.columns)} columnas.")
+    lines.append(f"Columnas: {list(df.columns)}")
+    lines.append("")
+    lines.append("Tipos de datos:")
+    for c in df.columns:
+        lines.append(f"  - {c}: {df[c].dtype}, no nulos: {df[c].count()}")
+    lines.append("")
+    if numeric_cols:
+        lines.append("Estadísticas descriptivas (numéricas):")
+        lines.append(df[numeric_cols].describe().round(decimal_places).to_string())
+        lines.append("")
+    missing = df.isnull().sum()
+    missing = missing[missing > 0]
+    if len(missing) > 0:
+        lines.append("Valores faltantes:")
+        for c in missing.index:
+            pct = (df[c].isna().sum() / len(df) * 100).round(2)
+            lines.append(f"  - {c}: {missing[c]} ({pct}%)")
+        lines.append("")
+    if cat_cols:
+        lines.append("Resumen categóricas (únicos / moda):")
+        for c in cat_cols[:15]:
+            uniq = df[c].nunique()
+            mode = df[c].mode()
+            mode_val = mode.iloc[0] if len(mode) else "N/A"
+            lines.append(f"  - {c}: {uniq} valores únicos, moda: {mode_val}")
+        lines.append("")
+    if len(numeric_cols) >= 2:
+        corr = df[numeric_cols].corr()
+        lines.append("Correlaciones más fuertes (|r| > 0.3):")
+        pairs = []
+        for i in range(len(numeric_cols)):
+            for j in range(i + 1, len(numeric_cols)):
+                r = corr.iloc[i, j]
+                if abs(r) > 0.3:
+                    pairs.append((numeric_cols[i], numeric_cols[j], round(r, decimal_places)))
+        for a, b, r in sorted(pairs, key=lambda x: -abs(x[2]))[:15]:
+            lines.append(f"  - {a} vs {b}: r = {r}")
+        if not pairs:
+            lines.append("  (ninguna con |r| > 0.3)")
+    return "\n".join(lines)
+
+
+with tab_asistente:
+    st.header("Asistente de análisis con LLM")
+    st.caption("El modelo Llama 3.3 70B (Groq) describe los hallazgos del EDA a partir del resumen de los datos.")
+
+    if Groq is None:
+        st.warning("Instala el paquete **groq** para usar el asistente: `pip install groq`")
+        st.stop()
+
+    if not groq_api_key or not groq_api_key.strip():
+        st.info("Introduce tu **API Key de Groq** en la barra lateral para generar el análisis.")
+        st.markdown("Obtén una API key gratuita en [console.groq.com](https://console.groq.com).")
+    else:
+        if st.button("Generar análisis con LLM", type="primary"):
+            with st.spinner("Construyendo resumen del EDA y consultando al modelo..."):
+                try:
+                    summary = _build_eda_summary(df, numeric_cols, cat_cols, decimal_places)
+                    client = Groq(api_key=groq_api_key.strip())
+                    prompt = (
+                        "Eres un analista de datos experto. A continuación se te proporciona un resumen "
+                        "del análisis exploratorio (EDA) de un dataset. Describe de forma clara y concisa "
+                        "los hallazgos principales: estructura de los datos, calidad (valores faltantes), "
+                        "estadísticas relevantes de variables numéricas, patrones en categóricas y correlaciones "
+                        "destacadas. Responde en español y en formato legible (párrafos o listas).\n\n"
+                        "---\nResumen del EDA:\n---\n" + summary
+                    )
+                    response = client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[
+                            {"role": "system", "content": "Eres un analista de datos. Respondes siempre en español."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        max_tokens=2048,
+                        temperature=0.3
+                    )
+                    result = response.choices[0].message.content
+                    st.subheader("Hallazgos del EDA")
+                    st.markdown(result)
+                except Exception as e:
+                    st.error(f"Error al llamar a la API de Groq: {e}")
+                    st.caption("Comprueba que la API key sea correcta y que tengas acceso al modelo.")
 
 st.sidebar.divider()
 st.sidebar.caption("EDA Dashboard · pandas, numpy, matplotlib, seaborn, plotly, scipy")

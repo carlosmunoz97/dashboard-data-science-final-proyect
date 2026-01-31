@@ -65,6 +65,22 @@ if df is None:
     st.info("👆 Sube un archivo CSV o Excel desde la barra lateral para comenzar.")
     st.stop()
 
+# Barra en sidebar: cantidad de muestras a usar
+total_filas = len(df)
+n_samples = st.sidebar.slider(
+    "Cantidad de muestras",
+    min_value=1,
+    max_value=total_filas,
+    value=total_filas,
+    step=1,
+    help="Número de filas a tener en cuenta en el análisis (se toman desde el inicio del dataset)."
+)
+df = df.head(n_samples)
+if n_samples < total_filas:
+    st.sidebar.caption(f"Usando {n_samples:,} de {total_filas:,} filas.")
+else:
+    st.sidebar.caption(f"Usando todas las filas ({len(df):,}).")
+
 # Variables útiles para todas las pestañas
 numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()

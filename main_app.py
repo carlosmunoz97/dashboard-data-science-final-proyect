@@ -65,14 +65,20 @@ if df is None:
     st.info("👆 Sube un archivo CSV o Excel desde la barra lateral para comenzar.")
     st.stop()
 
-# Tabs principales
-tab_overview, tab_stats, tab_missing, tab_viz_static, tab_viz_interactive, tab_correlation = st.tabs([
-    "📋 Resumen", "📈 Estadísticas", "❓ Valores faltantes",
-    "📉 Gráficos (Matplotlib/Seaborn)", "🖱️ Gráficos interactivos (Plotly)", "🔗 Correlación"
+# Variables útiles para todas las pestañas
+numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+# Tabs principales: Cualitativo | Cuantitativo | Gráfico
+tab_cualitativo, tab_cuantitativo, tab_grafico = st.tabs([
+    "📋 Cualitativo", "📈 Cuantitativo", "📉 Gráfico"
 ])
 
-with tab_overview:
-    st.header("Resumen del dataset")
+# ========== CUALITATIVO ==========
+with tab_cualitativo:
+    st.header("Análisis cualitativo")
+    st.caption("Estructura del dataset, tipos de datos y variables categóricas.")
+
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Filas", f"{len(df):,}")
@@ -80,9 +86,6 @@ with tab_overview:
         st.metric("Columnas", len(df.columns))
     with col3:
         st.metric("Memoria (aprox.)", f"{df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
-
-    st.subheader("Primeras filas")
-    st.dataframe(df.head(20), use_container_width=True)
 
     st.subheader("Tipos de datos")
     dtype_df = pd.DataFrame({
@@ -92,31 +95,32 @@ with tab_overview:
     })
     st.dataframe(dtype_df, use_container_width=True, hide_index=True)
 
-with tab_stats:
-    st.header("Estadísticas descriptivas")
+    st.subheader("Primeras filas")
+    st.dataframe(df.head(20), use_container_width=True)
+
+    if cat_cols:
+        st.subheader("Frecuencias (variables cualitativas)")
+        col_cual = st.selectbox("Columna categórica", cat_cols, key="col_cual")
+        frec = df[col_cual].value_counts().reset_index()
+        frec.columns = [col_cual, "Frecuencia"]
+        frec["%"] = (frec["Frecuencia"] / frec["Frecuencia"].sum() * 100).round(2)
+        st.dataframe(frec, use_container_width=True, hide_index=True)
+        st.caption(f"Moda: **{df[col_cual].mode().iloc[0]}** (aparece {int((df[col_cual] == df[col_cual].mode().iloc[0]).sum())} veces).")
+    else:
+        st.info("No hay columnas categóricas (object/category) para frecuencias.")
+
+# ========== CUANTITATIVO ==========
+with tab_cuantitativo:
+    st.header("Análisis cuantitativo")
+    st.caption("Estadísticas numéricas, valores faltantes y tests.")
+
+    st.subheader("Estadísticas descriptivas")
     st.dataframe(
         df.describe(include="all").round(decimal_places),
         use_container_width=True
     )
 
-    # Test de normalidad (scipy) para columnas numéricas
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    if numeric_cols:
-        st.subheader("Test de normalidad (Shapiro-Wilk)")
-        st.caption("p-value > 0.05 sugiere que los datos podrían seguir una distribución normal.")
-        norm_results = []
-        for col in numeric_cols[:10]:  # máximo 10 columnas
-            sample = df[col].dropna()
-            if len(sample) >= 3 and len(sample) <= 5000:
-                stat, pval = stats.shapiro(sample)
-                norm_results.append({"Columna": col, "Estadístico": round(stat, 4), "p-value": round(pval, 4)})
-        if norm_results:
-            st.dataframe(pd.DataFrame(norm_results), use_container_width=True, hide_index=True)
-        else:
-            st.info("No hay suficientes datos numéricos o muestras válidas para el test.")
-
-with tab_missing:
-    st.header("Análisis de valores faltantes")
+    st.subheader("Valores faltantes (tabla)")
     missing = df.isnull().sum()
     missing_pct = (missing / len(df) * 100).round(2)
     missing_df = pd.DataFrame({
@@ -129,6 +133,47 @@ with tab_missing:
         st.success("No hay valores faltantes.")
     else:
         st.dataframe(missing_df, use_container_width=True, hide_index=True)
+
+    if numeric_cols:
+        st.subheader("Test de normalidad (Shapiro-Wilk)")
+        st.caption("p-value > 0.05 sugiere que los datos podrían seguir una distribución normal.")
+        norm_results = []
+        for col in numeric_cols[:10]:
+            sample = df[col].dropna()
+            if len(sample) >= 3 and len(sample) <= 5000:
+                stat, pval = stats.shapiro(sample)
+                norm_results.append({"Columna": col, "Estadístico": round(stat, 4), "p-value": round(pval, 4)})
+        if norm_results:
+            st.dataframe(pd.DataFrame(norm_results), use_container_width=True, hide_index=True)
+        else:
+            st.info("No hay suficientes datos numéricos o muestras válidas para el test.")
+
+        if len(numeric_cols) >= 2:
+            st.subheader("Correlación de Pearson (scipy)")
+            c1 = st.selectbox("Columna 1", numeric_cols, key="corr1")
+            c2 = st.selectbox("Columna 2", numeric_cols, key="corr2")
+            if c1 != c2:
+                clean = df[[c1, c2]].dropna()
+                r, p = stats.pearsonr(clean[c1], clean[c2])
+                st.write(f"**Coeficiente r:** {r:.4f}  |  **p-value:** {p:.4f}")
+
+# ========== GRÁFICO ==========
+with tab_grafico:
+    st.header("Análisis gráfico")
+    st.caption("Visualizaciones con Matplotlib, Seaborn y Plotly.")
+    sns.set_theme(style=theme)
+
+    # Gráfico de valores faltantes
+    missing = df.isnull().sum()
+    missing_pct = (missing / len(df) * 100).round(2)
+    missing_df = pd.DataFrame({
+        "Columna": df.columns,
+        "Faltantes": missing.values,
+        "%": missing_pct.values
+    })
+    missing_df = missing_df[missing_df["Faltantes"] > 0].sort_values("Faltantes", ascending=False)
+    if len(missing_df) > 0:
+        st.subheader("Valores faltantes (% por columna)")
         fig_miss, ax = plt.subplots(figsize=(10, max(4, len(missing_df) * 0.3)))
         sns.barplot(data=missing_df, y="Columna", x="%", ax=ax, palette="viridis")
         ax.set_xlabel("% faltantes")
@@ -136,11 +181,8 @@ with tab_missing:
         st.pyplot(fig_miss)
         plt.close()
 
-with tab_viz_static:
-    st.header("Gráficos estáticos (Matplotlib / Seaborn)")
-    sns.set_theme(style=theme)
-
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    # Gráficos estáticos (Matplotlib / Seaborn)
+    st.subheader("Gráficos estáticos (Matplotlib / Seaborn)")
     if not numeric_cols:
         st.warning("No hay columnas numéricas para graficar.")
     else:
@@ -161,7 +203,6 @@ with tab_viz_static:
                 st.pyplot(fig2)
                 plt.close()
 
-        # Boxplot por columna numérica
         col_box = st.selectbox("Boxplot (columna)", numeric_cols, key="box")
         fig3, ax3 = plt.subplots(figsize=(8, 4))
         sns.boxplot(y=df[col_box], ax=ax3)
@@ -170,15 +211,12 @@ with tab_viz_static:
         st.pyplot(fig3)
         plt.close()
 
-with tab_viz_interactive:
-    st.header("Gráficos interactivos (Plotly)")
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
-
+    # Gráficos interactivos (Plotly)
+    st.subheader("Gráficos interactivos (Plotly)")
     if not numeric_cols:
         st.warning("No hay columnas numéricas.")
     else:
-        plot_type = st.radio("Tipo de gráfico", ["Histograma", "Dispersión", "Barras", "Box"], horizontal=True)
+        plot_type = st.radio("Tipo de gráfico", ["Histograma", "Dispersión", "Barras", "Box"], horizontal=True, key="plot_type")
 
         if plot_type == "Histograma":
             col_hist = st.selectbox("Columna", numeric_cols, key="plotly_hist")
@@ -196,8 +234,7 @@ with tab_viz_interactive:
 
         elif plot_type == "Barras":
             col_bar = st.selectbox("Columna para barras", numeric_cols + cat_cols, key="px_bar")
-            agg_col = st.selectbox("Agregar (si numérica)", [None] + numeric_cols, key="px_agg") if numeric_cols else None
-            if df[col_bar].dtype in ["object", "category"] or col_bar in cat_cols:
+            if col_bar in cat_cols or df[col_bar].dtype in ["object", "category"]:
                 counts = df[col_bar].value_counts().reset_index()
                 counts.columns = [col_bar, "count"]
                 fig = px.bar(counts, x=col_bar, y="count", title=f"Frecuencia de {col_bar}")
@@ -213,9 +250,8 @@ with tab_viz_interactive:
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
 
-with tab_correlation:
-    st.header("Matriz de correlación")
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    # Matriz de correlación (gráfico)
+    st.subheader("Matriz de correlación (heatmap)")
     if len(numeric_cols) < 2:
         st.warning("Se necesitan al menos 2 columnas numéricas para la correlación.")
     else:
@@ -227,15 +263,6 @@ with tab_correlation:
         plt.tight_layout()
         st.pyplot(fig_corr)
         plt.close()
-
-        # Correlación con scipy (Pearson)
-        st.subheader("Correlación de Pearson (scipy)")
-        c1 = st.selectbox("Columna 1", numeric_cols, key="corr1")
-        c2 = st.selectbox("Columna 2", numeric_cols, key="corr2")
-        if c1 != c2:
-            clean = df[[c1, c2]].dropna()
-            r, p = stats.pearsonr(clean[c1], clean[c2])
-            st.write(f"**Coeficiente r:** {r:.4f}  |  **p-value:** {p:.4f}")
 
 st.sidebar.divider()
 st.sidebar.caption("EDA Dashboard · pandas, numpy, matplotlib, seaborn, plotly, scipy")
